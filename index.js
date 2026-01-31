@@ -1,206 +1,174 @@
-const express = require("express");
-const axios = require("axios");
-const cors = require("cors");
+import express from "express";
 
 const app = express();
-app.use(cors());
+const PORT = 3000;
 
-/* ================== API GỐC ================== */
-const API_TX  = "https://lc79md5.vercel.app/lc79/tx";
+/* ================= API GỐC ================= */
+
 const API_MD5 = "https://lc79md5.vercel.app/lc79/md5";
+const API_HU  = "https://lc79md5.vercel.app/lc79/tx";
 
-/* ================== BIẾN ================== */
-let historyTX = [];
-let historyMD5 = [];
+/* ================= FETCH DATA ================= */
 
-let lastTX = null;
-let lastMD5 = null;
-let lastPhienTX = null;
-let lastPhienMD5 = null;
+async function fetchAPI(game) {
+    const url = game === "md5" ? API_MD5 : API_HU;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Không lấy được API gốc");
+    return res.json();
+}
 
-const MAX_HISTORY = 80;
+/* ================= MAP DATA ================= */
 
-/* ================== TOOL ================== */
-const toTX = kq => (kq === "Tài" ? "T" : "X");
+function mapKetQuaTX(ket_qua) {
+    return ket_qua === "Tài" ? "T" : "X";
+}
 
-/* ================== PATTERN TX ================== */
-const TX_FOLLOW = [
-  "TTXX", "XXTT",
-  "TTTXXX", "XXXTTT",
-  "TTTTXXXX", "XXXXTTTT"
-];
+function buildHistory(list) {
+    return list.map(x => mapKetQuaTX(x.ket_qua));
+}
 
-const TX_BREAK = [
-  "TTXXXXX", "XXTTTTT",
-  "TXXTTTT", "XTTXXXX"
-];
+/* ================= SK PATTERN ================= */
 
-/* ================== PATTERN MD5 ================== */
-const MD5_BREAK = [
-  "TTXX", "XXTT",
-  "TXXTT", "XTTXX",
-  "TTTXXX", "XXXTTT",
-  "TXXTTTT", "XTTXXXX"
-];
+function detectSK(history) {
+    if (history.length < 9) return { detected: false };
 
-const MD5_FOLLOW_SHORT = [
-  "TXTX", "XTXT"
-];
+    const last = history.slice(-9);
 
-/* ================== MEMORY TỰ HỌC ================== */
-const txMemory = {};
-const md5Memory = {};
+    let alternating = true;
+    for (let i = 1; i < last.length - 1; i++) {
+        if (last[i] === last[i - 1]) {
+            alternating = false;
+            break;
+        }
+    }
 
-/* ================== MEMORY CORE ================== */
-function initPattern(memory, pattern) {
-  if (!memory[pattern]) {
-    memory[pattern] = {
-      win: 0,
-      lose: 0,
-      confidence: 80,
-      locked: false
+    if (alternating && last[last.length - 1] === last[last.length - 2]) {
+        return {
+            detected: true,
+            name: "XEN_KE_DAI_BI_PHA",
+            prediction: last[last.length - 1],
+            confidence: 0.84
+        };
+    }
+
+    return { detected: false };
+}
+
+/* ================= TTOAN – LC79 (RÚT GỌN) ================= */
+
+function runTtoan(history) {
+    let vote = { T: 0, X: 0 };
+
+    // Trend 20
+    const l20 = history.slice(-20);
+    const t20 = l20.filter(x => x === "T").length;
+    const x20 = l20.length - t20;
+    if (t20 !== x20) vote[t20 > x20 ? "T" : "X"] += 1.2;
+
+    // Mean reversion 12
+    const l12 = history.slice(-12);
+    const t12 = l12.filter(x => x === "T").length;
+    const x12 = l12.length - t12;
+    if (Math.abs(t12 - x12) / 12 >= 0.4) {
+        vote[t12 > x12 ? "X" : "T"] += 1.1;
+    }
+
+    // Momentum 3
+    const l3 = history.slice(-3);
+    if (l3.every(x => x === "T")) vote.T += 1;
+    if (l3.every(x => x === "X")) vote.X += 1;
+
+    const prediction =
+        vote.T > vote.X ? "T" :
+        vote.X > vote.T ? "X" : "NO_BET";
+
+    const confidence =
+        Math.max(vote.T, vote.X) /
+        (vote.T + vote.X || 1);
+
+    return { prediction, confidence, vote };
+}
+
+/* ================= FINAL ================= */
+
+function finalDecision(ttoan, sk) {
+    if (sk.detected && sk.confidence >= 0.8) {
+        return {
+            prediction: sk.prediction,
+            confidence: sk.confidence,
+            source: "SK"
+        };
+    }
+    return {
+        prediction: ttoan.prediction,
+        confidence: ttoan.confidence,
+        source: "LC79"
     };
-  }
 }
 
-function updateLearning(memory, pattern, isWin) {
-  initPattern(memory, pattern);
+/* ================= BUILD JSON ================= */
 
-  if (isWin) {
-    memory[pattern].win++;
-    memory[pattern].confidence = Math.min(95, memory[pattern].confidence + 2);
-  } else {
-    memory[pattern].lose++;
-    memory[pattern].confidence -= 5;
-  }
+function buildJson(raw, final, sk, ttoan) {
+    const last = raw[raw.length - 1];
 
-  if (
-    (memory[pattern].lose >= 3 && memory[pattern].win === 0) ||
-    memory[pattern].confidence < 60
-  ) {
-    memory[pattern].locked = true;
-  }
+    return {
+        Phien_truoc: {
+            Xuc_xac1: last.xuc_xac_1,
+            Xuc_xac2: last.xuc_xac_2,
+            Xuc_xac3: last.xuc_xac_3,
+            Tong: last.tong,
+            Ket_qua: mapKetQuaTX(last.ket_qua)
+        },
+        Phien_hien_tai: {
+            Du_doan: final.prediction,
+            Do_tin_cay: `${(final.confidence * 100).toFixed(2)}%`,
+            Pattern: sk.detected ? sk.name : "NONE",
+            Chi_tiet: {
+                Nguon: final.source,
+                SK: {
+                    Phat_hien: sk.detected,
+                    Do_tin_cay: sk.detected ? `${(sk.confidence * 100).toFixed(0)}%` : "0%"
+                },
+                TTOAN: {
+                    Du_doan: ttoan.prediction,
+                    Do_tin_cay: `${(ttoan.confidence * 100).toFixed(0)}%`,
+                    Tong_phieu: ttoan.vote
+                },
+                Trang_thai:
+                    final.confidence >= 0.8 ? "STRONG" :
+                    final.confidence >= 0.65 ? "MEDIUM" : "WEAK"
+            }
+        },
+        Timestamp: Date.now()
+    };
 }
 
-/* ================== ENGINE TX ================== */
-function predictTX(pattern) {
-  for (const p of TX_FOLLOW.concat(TX_BREAK)) {
-    if (pattern.endsWith(p)) {
-      initPattern(txMemory, p);
-      const mem = txMemory[p];
+/* ================= API ================= */
 
-      if (mem.locked) {
-        return { mode: "NO BET", ly_do: "TX pattern bị khóa" };
-      }
+app.get("/api/:game", async (req, res) => {
+    try {
+        const game = req.params.game; // md5 | hu
+        if (!["md5", "hu"].includes(game)) {
+            return res.status(400).json({ error: "Game không hợp lệ" });
+        }
 
-      const last = pattern.slice(-1);
-      const du_doan = TX_BREAK.includes(p)
-        ? (last === "T" ? "Xỉu" : "Tài")
-        : (last === "T" ? "Tài" : "Xỉu");
+        const raw = await fetchAPI(game);
+        const history = buildHistory(raw);
 
-      return {
-        engine: "TX",
-        du_doan,
-        do_tin_cay: `${mem.confidence}%`,
-        pattern: p,
-        tu_hoc: true
-      };
+        const sk = detectSK(history);
+        const ttoan = runTtoan(history);
+        const final = finalDecision(ttoan, sk);
+
+        res.json(buildJson(raw, final, sk, ttoan));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-  }
-
-  return { engine: "TX", du_doan: "NO BET", do_tin_cay: "0%" };
-}
-
-/* ================== ENGINE MD5 ================== */
-function predictMD5(pattern) {
-  for (const p of MD5_BREAK.concat(MD5_FOLLOW_SHORT)) {
-    if (pattern.endsWith(p)) {
-      initPattern(md5Memory, p);
-      const mem = md5Memory[p];
-
-      if (mem.locked) {
-        return { mode: "NO BET", ly_do: "MD5 pattern bị khóa" };
-      }
-
-      const last = pattern.slice(-1);
-      const du_doan = MD5_BREAK.includes(p)
-        ? (last === "T" ? "Xỉu" : "Tài")
-        : (last === "T" ? "Tài" : "Xỉu");
-
-      return {
-        engine: "MD5",
-        du_doan,
-        do_tin_cay: `${mem.confidence}%`,
-        pattern: p,
-        tu_hoc: true
-      };
-    }
-  }
-
-  return { engine: "MD5", du_doan: "NO BET", do_tin_cay: "0%" };
-}
-
-/* ================== FETCH TX ================== */
-async function fetchTX() {
-  try {
-    const { data } = await axios.get(API_TX, { timeout: 5000 });
-    if (data.phien !== lastPhienTX) {
-      lastPhienTX = data.phien;
-      lastTX = data;
-      historyTX.push(toTX(data.ket_qua));
-      if (historyTX.length > MAX_HISTORY) historyTX.shift();
-    }
-  } catch {}
-}
-
-/* ================== FETCH MD5 ================== */
-async function fetchMD5() {
-  try {
-    const { data } = await axios.get(API_MD5, { timeout: 5000 });
-    if (data.phien !== lastPhienMD5) {
-      lastPhienMD5 = data.phien;
-      lastMD5 = data;
-      historyMD5.push(toTX(data.ket_qua));
-      if (historyMD5.length > MAX_HISTORY) historyMD5.shift();
-    }
-  } catch {}
-}
-
-fetchTX();
-fetchMD5();
-setInterval(fetchTX, 8000);
-setInterval(fetchMD5, 8000);
-
-/* ================== API TX ================== */
-app.get("/api/lc79/tx", (req, res) => {
-  const pattern = historyTX.join("");
-  const pred = predictTX(pattern);
-
-  res.json({
-    type: "TX",
-    pattern,
-    ...pred,
-    phien: lastTX?.phien ?? null,
-    id: "LC79 TX VIP AUTO LEARN"
-  });
 });
 
-/* ================== API MD5 ================== */
-app.get("/api/lc79/md5", (req, res) => {
-  const pattern = historyMD5.join("");
-  const pred = predictMD5(pattern);
+/* ================= START ================= */
 
-  res.json({
-    type: "MD5",
-    pattern,
-    ...pred,
-    phien: lastMD5?.phien ?? null,
-    id: "LC79 MD5 VIP AUTO LEARN"
-  });
-});
-
-/* ================== START ================== */
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🚀 LC79 VIP AUTO-LEARN RUNNING ON", PORT);
+    console.log(`✅ API chạy tại:`);
+    console.log(`MD5 → http://localhost:${PORT}/api/md5`);
+    console.log(`HŨ  → http://localhost:${PORT}/api/hu`);
 });
