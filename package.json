@@ -1,22 +1,15 @@
 {
   "name": "testapi",
   "version": "1.0.0",
-  "description": "LC79 TX & MD5 VIP Auto Learning Pattern API",
+  "type": "module",
   "main": "index.js",
-  "type": "commonjs",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
-  },
-  "engines": {
-    "node": ">=18.x"
+    "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.7",
-    "cors": "^2.8.5",
     "express": "^4.19.2"
   },
-  "devDependencies": {
-    "nodemon": "^3.0.3"
+  "engines": {
+    "node": ">=18"
   }
 }
