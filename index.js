@@ -1,7 +1,8 @@
+
 import express from "express";
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 /* ================= API GỐC ================= */
 
@@ -127,7 +128,9 @@ function buildJson(raw, final, sk, ttoan) {
                 Nguon: final.source,
                 SK: {
                     Phat_hien: sk.detected,
-                    Do_tin_cay: sk.detected ? `${(sk.confidence * 100).toFixed(0)}%` : "0%"
+                    Do_tin_cay: sk.detected
+                        ? `${(sk.confidence * 100).toFixed(0)}%`
+                        : "0%"
                 },
                 TTOAN: {
                     Du_doan: ttoan.prediction,
@@ -168,7 +171,7 @@ app.get("/api/:game", async (req, res) => {
 /* ================= START ================= */
 
 app.listen(PORT, () => {
-    console.log(`✅ API chạy tại:`);
-    console.log(`MD5 → http://localhost:${PORT}/api/md5`);
-    console.log(`HŨ  → http://localhost:${PORT}/api/hu`);
+    console.log("✅ LC79 API READY");
+    console.log(`MD5 → /api/md5`);
+    console.log(`HŨ  → /api/hu`);
 });
