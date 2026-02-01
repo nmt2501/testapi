@@ -154,7 +154,7 @@ function buildJson(game, raw, final, pattern, ttoan, history) {
     },
 
     Phien_hien_tai: {
-      Phien: raw.phien, // 🔥 LẤY TRỰC TIẾP TỪ API GỐC
+      Phien: raw.phien_hien_tai, // 🔥 LẤY TRỰC TIẾP TỪ API GỐC
       Du_doan: final.prediction,
       Do_tin_cay: `${(final.confidence * 100).toFixed(2)}%`,
       Pattern: pattern.detected ? pattern.name : "NONE",
